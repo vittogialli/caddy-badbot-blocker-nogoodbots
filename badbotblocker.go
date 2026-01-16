@@ -254,9 +254,6 @@ func (m *BadBotMatcher) updateLists(data *badBotData) error {
 	goodSubnets := make([]net.IPNet, 0)
 
 	trustedIpRangeList, err := m.fetchList(m.TrustedIPListURL, []string{
-		"https://raw.githubusercontent.com/mitchellkrogza/nginx-ultimate-bad-bot-blocker/refs/heads/master/_generator_lists/bing-ip-ranges.list",
-		"https://raw.githubusercontent.com/mitchellkrogza/nginx-ultimate-bad-bot-blocker/refs/heads/master/_generator_lists/cloudflare-ip-ranges.list",
-		"https://raw.githubusercontent.com/mitchellkrogza/nginx-ultimate-bad-bot-blocker/refs/heads/master/_generator_lists/google-ip-ranges.list",
 	})
 	if err != nil {
 		return err
