@@ -265,31 +265,41 @@ func (m *BadBotMatcher) updateLists(data *badBotData) error {
 	}
 
 	// Download the list of malicious IPs
-	ipList, err := m.fetchList(m.IPListURL, []string{
-		"https://raw.githubusercontent.com/mitchellkrogza/nginx-ultimate-bad-bot-blocker/refs/heads/master/_generator_lists/bad-ip-addresses.list",
-	})
-	if err != nil {
-		return err
-	}
-	data.BadIPs = make(map[string]bool)
-	for _, ipStr := range ipList {
-		if strings.Contains(ipStr, "/") {
-			_, subnet, err := net.ParseCIDR(ipStr)
-			if err == nil {
-				data.BadSubnets = append(data.BadSubnets, *subnet)
-			}
-		} else {
-			isBad := true
-			for _, subnet := range goodSubnets {
-				ip := net.ParseIP(ipStr)
-				if subnet.Contains(ip) {
-					isBad = false
-					break
-				}
-			}
-			data.BadIPs[ipStr] = isBad
-		}
-	}
+    ipList, err := m.fetchList(m.IPListURL, []string{
+        "https://raw.githubusercontent.com/mitchellkrogza/nginx-ultimate-bad-bot-blocker/refs/heads/master/_generator_lists/bad-ip-addresses.list",
+        "https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/refs/heads/main/abuseipdb-s100-14d.ipv4", // Add AbuseIPDB URL here
+    })
+    if err != nil {
+        return err
+    }
+    data.BadIPs = make(map[string]bool)
+    for _, line := range ipList {
+        line = strings.TrimSpace(line)
+        if line == "" || strings.HasPrefix(line, "#") {
+            // skip empty or comment line
+            continue
+        }
+        // Strip inline comments: split at '#'
+        parts := strings.SplitN(line, "#", 2)
+        ipStr := strings.TrimSpace(parts[0])
+
+        if strings.Contains(ipStr, "/") {
+            _, subnet, err := net.ParseCIDR(ipStr)
+            if err == nil {
+                data.BadSubnets = append(data.BadSubnets, *subnet)
+            }
+        } else {
+            isBad := true
+            for _, subnet := range goodSubnets {
+                ip := net.ParseIP(ipStr)
+                if subnet.Contains(ip) {
+                    isBad = false
+                    break
+                }
+            }
+            data.BadIPs[ipStr] = isBad
+        }
+    }
 
 	// Download the list of malicious Referers
 	refererList, err := m.fetchList(m.RefererListURL, []string{
