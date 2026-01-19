@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
@@ -22,11 +23,15 @@ type badBotData struct {
 	BadIPs        map[string]bool
 	BadReferers   map[string]bool
 	BadSubnets    []net.IPNet
+	stopCh        chan struct{}
 
 	mutex sync.RWMutex
 }
 
 func (b *badBotData) Destruct() error {
+	if b.stopCh != nil {
+		close(b.stopCh)
+	}
 	return nil
 }
 
@@ -40,10 +45,11 @@ type BadBotMatcher struct {
 	ExcludeUserAgents []string `json:"exclude_user_agents,omitempty"`
 	ExcludeIPs        []string `json:"exclude_ips,omitempty"`
 
-	UserAgentListURL []string `json:"user_agent_list_url,omitempty"`
-	IPListURL        []string `json:"ip_list_url,omitempty"`
-	RefererListURL   []string `json:"referer_list_url,omitempty"`
-	TrustedIPListURL []string `json:"trusted_ip_list_url,omitempty"`
+	UserAgentListURL []string      `json:"user_agent_list_url,omitempty"`
+	IPListURL        []string      `json:"ip_list_url,omitempty"`
+	RefererListURL   []string      `json:"referer_list_url,omitempty"`
+	TrustedIPListURL []string      `json:"trusted_ip_list_url,omitempty"`
+	RefreshInterval  time.Duration `json:"refresh_interval,omitempty"`
 
 	data *badBotData
 
@@ -62,12 +68,17 @@ func (BadBotMatcher) CaddyModule() caddy.ModuleInfo {
 func (m *BadBotMatcher) Provision(ctx caddy.Context) error {
 	m.logger = ctx.Logger(m)
 
+	if m.RefreshInterval == 0 {
+		m.RefreshInterval = 24 * time.Hour
+	}
+
 	resource, _, err := poolKey.LoadOrNew("badbotblocker_lists", func() (caddy.Destructor, error) {
 		data := &badBotData{
 			BadUserAgents: make(map[string]bool),
 			BadIPs:        make(map[string]bool),
 			BadReferers:   make(map[string]bool),
 			BadSubnets:    make([]net.IPNet, 0),
+			stopCh:        make(chan struct{}),
 		}
 
 		err := m.updateLists(data)
@@ -81,6 +92,28 @@ func (m *BadBotMatcher) Provision(ctx caddy.Context) error {
 			zap.Int("ua_loaded", len(data.BadUserAgents)),
 			zap.Int("referer_loaded", len(data.BadReferers)),
 		)
+
+		go func() {
+			ticker := time.NewTicker(m.RefreshInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					err := m.updateLists(data)
+					if err != nil {
+						m.logger.Error("failed to update bad bot lists", zap.Error(err))
+					} else {
+						m.logger.Info("bad bot lists updated successfully",
+							zap.Int("ip_loaded", len(data.BadIPs)),
+							zap.Int("ua_loaded", len(data.BadUserAgents)),
+							zap.Int("referer_loaded", len(data.BadReferers)),
+						)
+					}
+				case <-data.stopCh:
+					return
+				}
+			}
+		}()
 
 		return data, nil
 	})
@@ -119,6 +152,17 @@ func (m *BadBotMatcher) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			m.RefererListURL = d.RemainingArgs()
 		case "trusted_ip_list_url":
 			m.TrustedIPListURL = d.RemainingArgs()
+		case "refresh_interval":
+			args := d.RemainingArgs()
+			if len(args) == 1 {
+				dur, err := time.ParseDuration(args[0])
+				if err != nil {
+					return err
+				}
+				m.RefreshInterval = dur
+			} else {
+				return d.ArgErr()
+			}
 		}
 	}
 
@@ -253,8 +297,7 @@ func (m *BadBotMatcher) updateLists(data *badBotData) error {
 
 	goodSubnets := make([]net.IPNet, 0)
 
-	trustedIpRangeList, err := m.fetchList(m.TrustedIPListURL, []string{
-	})
+	trustedIpRangeList, err := m.fetchList(m.TrustedIPListURL, []string{})
 	if err != nil {
 		return err
 	}
@@ -265,41 +308,42 @@ func (m *BadBotMatcher) updateLists(data *badBotData) error {
 	}
 
 	// Download the list of malicious IPs
-    ipList, err := m.fetchList(m.IPListURL, []string{
-        "https://raw.githubusercontent.com/mitchellkrogza/nginx-ultimate-bad-bot-blocker/refs/heads/master/_generator_lists/bad-ip-addresses.list",
-        "https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/refs/heads/main/abuseipdb-s100-14d.ipv4", // Add AbuseIPDB URL here
-    })
-    if err != nil {
-        return err
-    }
-    data.BadIPs = make(map[string]bool)
-    for _, line := range ipList {
-        line = strings.TrimSpace(line)
-        if line == "" || strings.HasPrefix(line, "#") {
-            // skip empty or comment line
-            continue
-        }
-        // Strip inline comments: split at '#'
-        parts := strings.SplitN(line, "#", 2)
-        ipStr := strings.TrimSpace(parts[0])
+	ipList, err := m.fetchList(m.IPListURL, []string{
+		"https://raw.githubusercontent.com/mitchellkrogza/nginx-ultimate-bad-bot-blocker/refs/heads/master/_generator_lists/bad-ip-addresses.list",
+		"https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/refs/heads/main/abuseipdb-s100-14d.ipv4", // Add AbuseIPDB URL here
+	})
+	if err != nil {
+		return err
+	}
+	data.BadIPs = make(map[string]bool)
+	data.BadSubnets = make([]net.IPNet, 0)
+	for _, line := range ipList {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			// skip empty or comment line
+			continue
+		}
+		// Strip inline comments: split at '#'
+		parts := strings.SplitN(line, "#", 2)
+		ipStr := strings.TrimSpace(parts[0])
 
-        if strings.Contains(ipStr, "/") {
-            _, subnet, err := net.ParseCIDR(ipStr)
-            if err == nil {
-                data.BadSubnets = append(data.BadSubnets, *subnet)
-            }
-        } else {
-            isBad := true
-            for _, subnet := range goodSubnets {
-                ip := net.ParseIP(ipStr)
-                if subnet.Contains(ip) {
-                    isBad = false
-                    break
-                }
-            }
-            data.BadIPs[ipStr] = isBad
-        }
-    }
+		if strings.Contains(ipStr, "/") {
+			_, subnet, err := net.ParseCIDR(ipStr)
+			if err == nil {
+				data.BadSubnets = append(data.BadSubnets, *subnet)
+			}
+		} else {
+			isBad := true
+			for _, subnet := range goodSubnets {
+				ip := net.ParseIP(ipStr)
+				if subnet.Contains(ip) {
+					isBad = false
+					break
+				}
+			}
+			data.BadIPs[ipStr] = isBad
+		}
+	}
 
 	// Download the list of malicious Referers
 	refererList, err := m.fetchList(m.RefererListURL, []string{
