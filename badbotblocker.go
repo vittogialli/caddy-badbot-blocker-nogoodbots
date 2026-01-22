@@ -342,6 +342,8 @@ func (m *BadBotMatcher) updateLists(data *badBotData) error {
 		"https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/refs/heads/main/abuseipdb-s100-14d.ipv4",
 		"https://raw.githubusercontent.com/mitchellkrogza/nginx-ultimate-bad-bot-blocker/refs/heads/master/_generator_lists/fake-googlebots.list"
 		"https://raw.githubusercontent.com/mitchellkrogza/nginx-ultimate-bad-bot-blocker/refs/heads/master/_generator_lists/seo-analysis-tools.list",
+		"https://raw.githubusercontent.com/borestad/firehol-mirror/refs/heads/main/botscout_30d.ipset",
+		"https://raw.githubusercontent.com/borestad/firehol-mirror/refs/heads/main/firehol_abusers_30d.netset",
 	})
 	if err != nil {
 		m.logger.Error("Failed to download Malicious IP lists", zap.Error(err))
