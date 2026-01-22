@@ -298,6 +298,9 @@ func (m *BadBotMatcher) updateLists(data *badBotData) error {
 	uaStart := time.Now()
 	userAgentList, err := m.fetchList(m.UserAgentListURL, []string{
 		"https://raw.githubusercontent.com/mitchellkrogza/nginx-ultimate-bad-bot-blocker/refs/heads/master/_generator_lists/bad-user-agents.list",
+		"https://raw.githubusercontent.com/mitchellkrogza/nginx-ultimate-bad-bot-blocker/refs/heads/master/_generator_lists/good-user-agents.list",
+		"https://raw.githubusercontent.com/mitchellkrogza/nginx-ultimate-bad-bot-blocker/refs/heads/master/_generator_lists/limited-user-agents.list",
+		"https://raw.githubusercontent.com/mitchellkrogza/nginx-ultimate-bad-bot-blocker/refs/heads/master/_generator_lists/seo-analysis-tools.list",
 	})
 	if err != nil {
 		m.logger.Error("Failed to download User-Agent list", zap.Error(err))
@@ -338,6 +341,7 @@ func (m *BadBotMatcher) updateLists(data *badBotData) error {
 	ipList, err := m.fetchList(m.IPListURL, []string{
 		"https://raw.githubusercontent.com/mitchellkrogza/nginx-ultimate-bad-bot-blocker/refs/heads/master/_generator_lists/bad-ip-addresses.list",
 		"https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/refs/heads/main/abuseipdb-s100-14d.ipv4",
+		"https://raw.githubusercontent.com/mitchellkrogza/nginx-ultimate-bad-bot-blocker/refs/heads/master/_generator_lists/fake-googlebots.list"
 	})
 	if err != nil {
 		m.logger.Error("Failed to download Malicious IP lists", zap.Error(err))
